@@ -1,180 +1,323 @@
 using System.Text.Json;
 using SharpClaw.Contracts.DTOs.Editor;
-using SharpClaw.Contracts.Modules.Foreign;
+using SharpClaw.Contracts.Modules;
+using SharpClaw.ModuleSDK;
+using SharpClaw.Modules.EditorCommon.Models;
 
 namespace SharpClaw.Modules.EditorCommon.Services;
 
-public sealed class EditorBridgeProtocolContractInvoker(EditorBridgeService bridge)
-    : IForeignModuleProtocolContractInvoker
+/// <summary>Executes the typed connection read action owned by EditorCommon.</summary>
+public sealed class EditorBridgeConnectionReadTerminal(EditorBridgeService bridge)
+    : IHostActionEntryTerminal<EditorBridgeConnectionReadAction, EditorBridgeConnectionReadResult>
 {
-    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
-    {
-        PropertyNameCaseInsensitive = true,
-    };
+    public Guid TerminalId => EditorProtocolContracts.BridgeConnectionReadTerminalId;
 
-    public string ContractName => EditorProtocolContracts.BridgeContractName;
-    public IReadOnlyList<ForeignModuleProtocolContractOperation> Operations =>
-        EditorProtocolContracts.Exports
-            .Single(contract => contract.ContractName == ContractName)
-            .Operations;
-
-    public async Task<JsonElement> InvokeAsync(
-        string operation,
-        JsonElement parameters,
-        CancellationToken ct = default)
+    public ValueTask<EditorBridgeConnectionReadResult> InvokeAsync(
+        ActionContext<EditorBridgeConnectionReadAction> context,
+        CancellationToken ct)
     {
-        return operation switch
-        {
-            "get_connection" => ToElement(ToConnectionResponse(
-                bridge.GetConnection(ReadGuid(parameters, "sessionId")))),
-            "list_connections" => ToElement(bridge.GetConnections().Select(ToConnectionResponse).ToList()),
-            "send_request" => ToElement(await bridge.SendRequestAsync(
-                ReadGuid(parameters, "sessionId"),
-                ReadString(parameters, "action"),
-                ReadParams(parameters),
-                ct)),
-            _ => throw new NotSupportedException(
-                $"Editor bridge operation '{operation}' is not registered."),
-        };
+        var connection = context.Action.SessionId is { } sessionId
+            ? bridge.GetConnection(sessionId)
+            : null;
+        var connections = context.Action.SessionId is null
+            ? bridge.GetConnections().Select(ToSummary).ToArray()
+            : Array.Empty<EditorBridgeConnectionSummary>();
+
+        return ValueTask.FromResult(new EditorBridgeConnectionReadResult(
+            connection is not null,
+            connection is null ? null : ToSummary(connection),
+            connections));
     }
 
-    private static Dictionary<string, object?>? ReadParams(JsonElement parameters)
-    {
-        if (!parameters.TryGetProperty("params", out var value)
-            || value.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
-        {
-            return null;
-        }
-
-        if (value.ValueKind != JsonValueKind.Object)
-            throw new ArgumentException("Property 'params' must be a JSON object.");
-
-        var result = new Dictionary<string, object?>(StringComparer.Ordinal);
-        foreach (var property in value.EnumerateObject())
-        {
-            result[property.Name] = property.Value.ValueKind switch
-            {
-                JsonValueKind.String => property.Value.GetString(),
-                JsonValueKind.Number when property.Value.TryGetInt64(out var integer) => integer,
-                JsonValueKind.Number => property.Value.GetDouble(),
-                JsonValueKind.True => true,
-                JsonValueKind.False => false,
-                JsonValueKind.Null => null,
-                _ => property.Value.Clone(),
-            };
-        }
-
-        return result.Count == 0 ? null : result;
-    }
-
-    private static EditorConnectionProtocolResponse ToConnectionResponse(EditorConnection? connection) =>
-        connection is null
-            ? new EditorConnectionProtocolResponse(false)
-            : new EditorConnectionProtocolResponse(
-                true,
-                connection.ConnectionId,
-                connection.SessionId,
-                connection.EditorType.ToString(),
-                connection.EditorVersion,
-                connection.WorkspacePath,
-                connection.Socket.State.ToString(),
-                connection.ConnectedAt);
-
-    private static Guid ReadGuid(JsonElement parameters, string propertyName)
-    {
-        if (!parameters.TryGetProperty(propertyName, out var property))
-            throw new ArgumentException($"Property '{propertyName}' is required.");
-
-        return property.ValueKind == JsonValueKind.String
-            ? Guid.Parse(property.GetString() ?? "")
-            : property.GetGuid();
-    }
-
-    private static string ReadString(JsonElement parameters, string propertyName)
-    {
-        if (!parameters.TryGetProperty(propertyName, out var property)
-            || property.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
-        {
-            throw new ArgumentException($"Property '{propertyName}' is required.");
-        }
-
-        return property.GetString()
-            ?? throw new ArgumentException($"Property '{propertyName}' is required.");
-    }
-
-    private static JsonElement ToElement<T>(T value) =>
-        JsonSerializer.SerializeToElement(value, JsonOptions);
-
-    private sealed record EditorConnectionProtocolResponse(
-        bool Exists,
-        string? ConnectionId = null,
-        Guid? SessionId = null,
-        string? EditorKey = null,
-        string? EditorVersion = null,
-        string? WorkspacePath = null,
-        string? SocketState = null,
-        DateTimeOffset? ConnectedAt = null);
+    private static EditorBridgeConnectionSummary ToSummary(EditorConnection connection) =>
+        new(
+            connection.ConnectionId,
+            connection.SessionId,
+            connection.EditorType.ToString(),
+            connection.EditorVersion,
+            connection.WorkspacePath,
+            connection.State,
+            connection.ConnectedAt);
 }
 
-public sealed class EditorSessionProtocolContractInvoker(EditorSessionService sessions)
-    : IForeignModuleProtocolContractInvoker
+/// <summary>Executes read-only typed editor bridge requests.</summary>
+public sealed class EditorBridgeRequestReadTerminal(EditorBridgeService bridge)
+    : IHostActionEntryTerminal<EditorBridgeRequestAction, EditorActionResponse>
 {
-    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
-    {
-        PropertyNameCaseInsensitive = true,
-    };
+    public Guid TerminalId => EditorProtocolContracts.BridgeRequestReadTerminalId;
 
-    public string ContractName => EditorProtocolContracts.SessionContractName;
-    public IReadOnlyList<ForeignModuleProtocolContractOperation> Operations =>
-        EditorProtocolContracts.Exports
-            .Single(contract => contract.ContractName == ContractName)
-            .Operations;
+    public ValueTask<EditorActionResponse> InvokeAsync(
+        ActionContext<EditorBridgeRequestAction> context,
+        CancellationToken ct) =>
+        EditorBridgeRequestTerminalSupport.InvokeAsync(bridge, context.Action, mutation: false, ct);
+}
 
-    public async Task<JsonElement> InvokeAsync(
-        string operation,
-        JsonElement parameters,
-        CancellationToken ct = default)
+/// <summary>Executes irreversible typed editor bridge requests.</summary>
+public sealed class EditorBridgeRequestMutationTerminal(EditorBridgeService bridge)
+    : IHostActionEntryTerminal<EditorBridgeRequestAction, EditorActionResponse>
+{
+    public Guid TerminalId => EditorProtocolContracts.BridgeRequestMutationTerminalId;
+
+    public ValueTask<EditorActionResponse> InvokeAsync(
+        ActionContext<EditorBridgeRequestAction> context,
+        CancellationToken ct) =>
+        EditorBridgeRequestTerminalSupport.InvokeAsync(bridge, context.Action, mutation: true, ct);
+}
+
+internal static class EditorBridgeRequestTerminalSupport
+{
+    public static ValueTask<EditorActionResponse> InvokeAsync(
+        EditorBridgeService bridge,
+        EditorBridgeRequestAction action,
+        bool mutation,
+        CancellationToken ct)
     {
-        return operation switch
+        var operationAllowed = mutation
+            ? EditorProtocolContracts.IsMutationBridgeOperation(action.Action)
+            : EditorProtocolContracts.IsReadBridgeOperation(action.Action);
+        if (!operationAllowed)
         {
-            "create" => ToElement(await sessions.CreateAsync(
-                Deserialize<CreateEditorSessionRequest>(parameters),
-                ct)),
-            "get" => ToElement(await sessions.GetByIdAsync(ReadGuid(parameters), ct)),
-            "list" => ToElement(await sessions.ListAsync(ct)),
-            "update" => ToElement(await sessions.UpdateAsync(
-                ReadGuid(parameters),
-                Deserialize<UpdateEditorSessionRequest>(
-                    parameters.TryGetProperty("request", out var request)
-                        ? request
-                        : parameters),
-                ct)),
-            "delete" => ToElement(await sessions.DeleteAsync(ReadGuid(parameters), ct)),
-            "list_ids" => ToElement((await sessions.ListAsync(ct)).Select(session => session.Id).ToList()),
-            "lookup_items" => ToElement((await sessions.ListAsync(ct))
-                .Select(session => new EditorSessionLookupItem(session.Id, session.Name))
-                .ToList()),
-            _ => throw new NotSupportedException(
-                $"Editor session operation '{operation}' is not registered."),
+            throw new ArgumentException(
+                $"Editor operation '{action.Action}' is not valid for the selected bridge action.");
+        }
+
+        var connection = bridge.GetRequiredConnection(
+            action.SessionId,
+            action.ExpectedEditorKey);
+        return new ValueTask<EditorActionResponse>(bridge.SendRequestAsync(
+            connection,
+            action.Action,
+            ToDictionary(action.Parameters),
+            ct));
+    }
+
+    private static Dictionary<string, object?>? ToDictionary(
+        IReadOnlyDictionary<string, JsonElement>? parameters)
+    {
+        if (parameters is null || parameters.Count == 0)
+            return null;
+
+        return parameters.ToDictionary(
+            item => item.Key,
+            item => (object?)item.Value.Clone(),
+            StringComparer.Ordinal);
+    }
+}
+
+/// <summary>Executes the read-only editor session actions.</summary>
+public sealed class EditorSessionReadTerminal(
+    EditorSessionService sessions,
+    EditorBridgeService bridge)
+    : IHostActionEntryTerminal<EditorSessionAction, JsonElement>
+{
+    public Guid TerminalId => EditorProtocolContracts.SessionReadTerminalId;
+
+    public async ValueTask<JsonElement> InvokeAsync(
+        ActionContext<EditorSessionAction> context,
+        CancellationToken ct)
+    {
+        var action = context.Action;
+        return action.Operation switch
+        {
+            EditorSessionOperation.Get => ToElement(
+                action.SessionId is { } id
+                    ? ConnectedOptional(await sessions.GetByIdAsync(id, ct))
+                    : null),
+            EditorSessionOperation.List => ToElement(
+                (await sessions.ListAsync(ct)).Select(ConnectedRequired).ToArray()),
+            EditorSessionOperation.ListIds => ToElement(
+                (await sessions.ListAsync(ct)).Select(session => session.Id).ToArray()),
+            EditorSessionOperation.LookupItems => ToElement(
+                (await sessions.ListAsync(ct))
+                    .Select(session => new EditorSessionLookupItem(session.Id, session.Name))
+                    .ToArray()),
+            _ => throw new ArgumentException(
+                $"Editor session operation '{action.Operation}' is not a read operation."),
         };
     }
 
-    private static Guid ReadGuid(JsonElement parameters, string propertyName = "id")
-    {
-        if (!parameters.TryGetProperty(propertyName, out var property))
-            throw new ArgumentException($"Property '{propertyName}' is required.");
+    private EditorSessionResponse? ConnectedOptional(EditorSessionResponse? response) =>
+        response is null
+            ? null
+            : response with { IsConnected = bridge.GetConnection(response.Id) is not null };
 
-        return property.ValueKind == JsonValueKind.String
-            ? Guid.Parse(property.GetString() ?? "")
-            : property.GetGuid();
+    private EditorSessionResponse ConnectedRequired(EditorSessionResponse response) =>
+        response with { IsConnected = bridge.GetConnection(response.Id) is not null };
+
+    internal static JsonElement ToElement<T>(T value) =>
+        JsonSerializer.SerializeToElement(value, EditorJson.Options);
+}
+
+/// <summary>Executes the mutable editor session actions.</summary>
+public sealed class EditorSessionMutationTerminal(EditorSessionService sessions)
+    : IHostActionEntryTerminal<EditorSessionAction, JsonElement>
+{
+    public Guid TerminalId => EditorProtocolContracts.SessionMutationTerminalId;
+
+    public async ValueTask<JsonElement> InvokeAsync(
+        ActionContext<EditorSessionAction> context,
+        CancellationToken ct)
+    {
+        var action = context.Action;
+        return action.Operation switch
+        {
+            EditorSessionOperation.GetOrCreate => await GetOrCreateAsync(action.Payload, ct),
+            EditorSessionOperation.Create => EditorSessionReadTerminal.ToElement(
+                await sessions.CreateAsync(
+                    Deserialize<CreateEditorSessionRequest>(action.Payload), ct)),
+            EditorSessionOperation.Update => EditorSessionReadTerminal.ToElement(
+                action.SessionId is { } id
+                    ? await sessions.UpdateAsync(
+                        id,
+                        Deserialize<UpdateEditorSessionRequest>(action.Payload),
+                        ct)
+                    : throw new ArgumentException("A session ID is required.")),
+            EditorSessionOperation.Delete => EditorSessionReadTerminal.ToElement(
+                action.SessionId is { } id
+                    ? await sessions.DeleteAsync(id, ct)
+                    : throw new ArgumentException("A session ID is required.")),
+            _ => throw new ArgumentException(
+                $"Editor session operation '{action.Operation}' is not a mutation."),
+        };
     }
 
-    private static T Deserialize<T>(JsonElement parameters) =>
-        parameters.Deserialize<T>(JsonOptions)
+    private static T Deserialize<T>(JsonElement payload) =>
+        payload.Deserialize<T>(EditorJson.Options)
         ?? throw new ArgumentException($"Could not deserialize {typeof(T).Name}.");
 
-    private static JsonElement ToElement<T>(T value) =>
-        JsonSerializer.SerializeToElement(value, JsonOptions);
-
-    private sealed record EditorSessionLookupItem(Guid Id, string Name);
+    private async Task<JsonElement> GetOrCreateAsync(
+        JsonElement payload,
+        CancellationToken ct)
+    {
+        var request = Deserialize<CreateEditorSessionRequest>(payload);
+        var editorType = Enum.TryParse<EditorType>(
+            request.EditorKey,
+            ignoreCase: true,
+            out var parsed)
+            ? parsed
+            : EditorType.Other;
+        var session = await sessions.GetOrCreateAsync(
+            request.Name,
+            editorType,
+            request.EditorVersion,
+            request.WorkspacePath,
+            ct);
+        return EditorSessionReadTerminal.ToElement(
+            EditorSessionService.ToResponse(session));
+    }
 }
+
+/// <summary>Invokes EditorCommon connection actions through the host entry.</summary>
+public sealed class EditorBridgeActionGateway(
+    EditorBridgeConnectionReadTerminal connectionTerminal)
+{
+    public async ValueTask<EditorBridgeConnectionReadResult> ReadAsync(
+        IHostActionEntry hostActionEntry,
+        HostActionEntryRequestContext hostContext,
+        Guid? sessionId,
+        CancellationToken ct)
+    {
+        var outcome = await hostActionEntry.InvokeAsync(
+            new HostActionEntryRequest<
+                EditorBridgeConnectionReadAction,
+                EditorBridgeConnectionReadResult>(
+                EditorProtocolContracts.BridgeConnectionReadDescriptor,
+                new EditorBridgeConnectionReadAction(sessionId),
+                hostContext),
+            connectionTerminal,
+            ct);
+        return RequireCompleted(outcome, "The editor connection read action did not complete.");
+    }
+
+    private static TResult RequireCompleted<TResult>(
+        IActionOutcome<TResult> outcome,
+        string message)
+    {
+        if (outcome.Kind != ActionOutcomeKind.Completed || outcome.Result is null)
+            throw new InvalidOperationException(outcome.Error?.Message ?? message);
+        return outcome.Result;
+    }
+}
+
+/// <summary>Invokes EditorCommon session actions through the host entry.</summary>
+public sealed class EditorSessionActionGateway(
+    EditorSessionReadTerminal readTerminal,
+    EditorSessionMutationTerminal mutationTerminal)
+{
+    public async ValueTask<JsonElement> ExecuteAsync(
+        IHostActionEntry hostActionEntry,
+        HostActionEntryRequestContext hostContext,
+        EditorSessionAction action,
+        CancellationToken ct)
+    {
+        var isRead = action.Operation is
+            EditorSessionOperation.Get or
+            EditorSessionOperation.List or
+            EditorSessionOperation.ListIds or
+            EditorSessionOperation.LookupItems;
+        var descriptor = isRead
+            ? EditorProtocolContracts.SessionReadDescriptor
+            : EditorProtocolContracts.SessionMutationDescriptor;
+
+        IActionOutcome<JsonElement> outcome = isRead
+            ? await hostActionEntry.InvokeAsync(
+                new HostActionEntryRequest<EditorSessionAction, JsonElement>(
+                    descriptor,
+                    action,
+                    hostContext),
+                readTerminal,
+                ct)
+            : await hostActionEntry.InvokeAsync(
+                new HostActionEntryRequest<EditorSessionAction, JsonElement>(
+                    descriptor,
+                    action,
+                    hostContext),
+                mutationTerminal,
+                ct);
+
+        if (outcome.Kind != ActionOutcomeKind.Completed ||
+            outcome.Result.ValueKind == JsonValueKind.Undefined)
+            throw new InvalidOperationException(
+                outcome.Error?.Message ?? "The editor session action did not complete.");
+        return outcome.Result;
+    }
+}
+
+/// <summary>Creates the editor chat context contribution from active connections.</summary>
+public sealed class EditorChatContextContributor(EditorBridgeService bridge)
+    : IChatContextContributor
+{
+    public ValueTask<ChatContextContribution> ContributeAsync(
+        ChatContextRequest request,
+        CancellationToken ct)
+    {
+        var connections = bridge.GetConnections();
+        var summary = connections.Count == 0
+            ? "(none)"
+            : string.Join(", ", connections.Select(connection =>
+            {
+                var text = connection.EditorType.ToString();
+                if (connection.EditorVersion is not null)
+                    text += $" {connection.EditorVersion}";
+                if (connection.WorkspacePath is not null)
+                    text += $" workspace={connection.WorkspacePath}";
+                return text;
+            }));
+
+        return ValueTask.FromResult(new ChatContextContribution(
+            [new SystemPromptSegment("editor", summary)],
+            [],
+            []));
+    }
+}
+
+/// <summary>Provides shared JSON options for editor action payloads.</summary>
+internal static class EditorJson
+{
+    internal static JsonSerializerOptions Options { get; } = new(JsonSerializerDefaults.Web)
+    {
+        PropertyNameCaseInsensitive = true,
+    };
+}
+
+internal sealed record EditorSessionLookupItem(Guid Id, string Name);

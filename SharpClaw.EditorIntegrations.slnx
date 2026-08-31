@@ -4,4 +4,7 @@
     <Project Path="SharpClaw.Modules.VS2026Editor/SharpClaw.Modules.VS2026Editor.csproj" />
     <Project Path="SharpClaw.Modules.VSCodeEditor/SharpClaw.Modules.VSCodeEditor.csproj" />
   </Folder>
+  <Folder Name="/Tests/">
+    <Project Path="SharpClaw.EditorIntegrations.Tests/SharpClaw.EditorIntegrations.Tests.csproj" />
+  </Folder>
 </Solution>

@@ -1,7 +1,7 @@
 {
   "id": "sharpclaw_vs2026_editor",
   "displayName": "VS 2026 Editor",
-  "version": "0.1.2-alpha",
+  "version": "0.1.3-alpha",
   "toolPrefix": "vs26",
   "runtime": "dotnet",
   "hostMode": "sidecar",
@@ -13,5 +13,10 @@
   "license": "AGPL-3.0",
   "platforms": [ "windows" ],
   "exports": [],
-  "requires": []
+  "requires": [
+    {
+      "contractName": "sharpclaw.editor",
+      "serviceType": "SharpClaw.Modules.EditorCommon.EditorModuleContract"
+    }
+  ]
 }

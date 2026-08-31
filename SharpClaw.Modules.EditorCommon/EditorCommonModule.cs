@@ -1,209 +1,107 @@
-using System.Text.Json;
-
-using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
-
-using SharpClaw.Contracts.Modules.Foreign;
 using SharpClaw.Contracts.Modules;
+using SharpClaw.ModuleSDK;
 using SharpClaw.Modules.EditorCommon.Handlers;
 using SharpClaw.Modules.EditorCommon.Services;
 
 namespace SharpClaw.Modules.EditorCommon;
 
-/// <summary>
-/// Infrastructure module: shared editor bridge and session services
-/// consumed by the VS 2026 and VS Code editor modules.
-/// No LLM-callable tools — this module provides only DI services,
-/// protocol contract exports, and REST/WebSocket endpoints.
-/// </summary>
-public sealed class EditorCommonModule : ISharpClawRuntimeModule, IForeignModuleProtocolContractModule
+/// <summary>Provides the shared editor bridge and editor session actions.</summary>
+public sealed class EditorCommonModule : ISharpClawModule, ISharpClawApplicationModule
 {
-    public string Id => "sharpclaw_editor_common";
-    public string DisplayName => "Editor Common";
-    public string ToolPrefix => "edc";
+    public ModuleIdentity Identity { get; } = new(
+        EditorProtocolContracts.EditorCommonModuleId,
+        "Editor Common",
+        "edc");
 
-    // ═══════════════════════════════════════════════════════════════
-    // Protocol Contract Exports
-    // ═══════════════════════════════════════════════════════════════
-
-    public IReadOnlyList<ForeignModuleProtocolContractExport> ExportedProtocolContracts =>
-        EditorProtocolContracts.Exports;
-
-    public IReadOnlyList<ForeignModuleProtocolContractRequirement> RequiredProtocolContracts => [];
-
-    public IReadOnlyList<ModuleStorageContractDescriptor> GetStorageContracts() =>
-    [
-        new(
-            Id,
-            "editor_sessions",
-            StorageOperations(),
-            "Editor session records keyed by connected editor workspace.",
-            [
-                new("name", ModuleStorageIndexValueKind.String),
-                new("editorType", ModuleStorageIndexValueKind.String),
-                new("workspacePath", ModuleStorageIndexValueKind.String),
-                new("editorWorkspace", ModuleStorageIndexValueKind.String),
-            ],
-            MaxDocumentBytes: 131_072,
-            MaxBatchSize: 100),
-    ];
-
-    // ═══════════════════════════════════════════════════════════════
-    // DI Registration
-    // ═══════════════════════════════════════════════════════════════
-
-    public void ConfigureServices(IServiceCollection services)
+    public void Configure(ISharpClawModuleBuilder module)
     {
-        services.AddScoped<EditorSessionStore>();
-        services.AddSingleton<EditorBridgeService>();
-        services.AddScoped<EditorSessionService>();
-        services.AddScoped<IForeignModuleProtocolContractInvoker, EditorBridgeProtocolContractInvoker>();
-        services.AddScoped<IForeignModuleProtocolContractInvoker, EditorSessionProtocolContractInvoker>();
+        module.Services.AddScoped<EditorSessionStore>();
+        module.Services.AddSingleton<EditorBridgeService>();
+        module.Services.AddScoped<EditorSessionService>();
+        module.Services.AddScoped<EditorBridgeConnectionReadTerminal>();
+        module.Services.AddScoped<EditorBridgeRequestReadTerminal>();
+        module.Services.AddScoped<EditorBridgeRequestMutationTerminal>();
+        module.Services.AddScoped<EditorSessionReadTerminal>();
+        module.Services.AddScoped<EditorSessionMutationTerminal>();
+        module.Services.AddScoped<EditorBridgeActionGateway>();
+        module.Services.AddScoped<EditorSessionActionGateway>();
+        module.Services.AddSingleton<EditorCliHandler>();
+        module.Services.AddScoped<EditorEndpointContribution>();
+        module.Services.AddScoped<EditorWebSocketEndpointContribution>();
+        module.Services.AddScoped<EditorSessionEndpointContribution>();
+        module.Services.AddScoped<EditorChatContextContributor>();
+        module.Services.AddScoped<IChatContextContributor, EditorChatContextContributor>();
+
+        module.Contracts.Export<EditorModuleContract>(EditorProtocolContracts.ContractName);
+        module.Storage.Add(EditorProtocolContracts.SessionStorage);
+
+        module.Actions.Add(EditorProtocolContracts.BridgeConnectionReadDescriptor);
+        module.AddActionEntry<
+            EditorBridgeConnectionReadAction,
+            EditorBridgeConnectionReadResult,
+            EditorBridgeConnectionReadTerminal>(
+            EditorProtocolContracts.BridgeConnectionReadDescriptor,
+            EditorProtocolContracts.BridgeConnectionReadTerminalId);
+
+        module.Actions.Add(EditorProtocolContracts.BridgeRequestReadDescriptor);
+        module.AddActionEntry<
+            EditorBridgeRequestAction,
+            SharpClaw.Contracts.DTOs.Editor.EditorActionResponse,
+            EditorBridgeRequestReadTerminal>(
+            EditorProtocolContracts.BridgeRequestReadDescriptor,
+            EditorProtocolContracts.BridgeRequestReadTerminalId);
+
+        module.Actions.Add(EditorProtocolContracts.BridgeRequestMutationDescriptor);
+        module.AddActionEntry<
+            EditorBridgeRequestAction,
+            SharpClaw.Contracts.DTOs.Editor.EditorActionResponse,
+            EditorBridgeRequestMutationTerminal>(
+            EditorProtocolContracts.BridgeRequestMutationDescriptor,
+            EditorProtocolContracts.BridgeRequestMutationTerminalId);
+
+        module.Actions.Add(EditorProtocolContracts.SessionReadDescriptor);
+        module.AddActionEntry<
+            EditorSessionAction,
+            System.Text.Json.JsonElement,
+            EditorSessionReadTerminal>(
+            EditorProtocolContracts.SessionReadDescriptor,
+            EditorProtocolContracts.SessionReadTerminalId);
+
+        module.Actions.Add(EditorProtocolContracts.SessionMutationDescriptor);
+        module.AddActionEntry<
+            EditorSessionAction,
+            System.Text.Json.JsonElement,
+            EditorSessionMutationTerminal>(
+            EditorProtocolContracts.SessionMutationDescriptor,
+            EditorProtocolContracts.SessionMutationTerminalId);
+
+        module.Chat.AddContextContributor<EditorChatContextContributor>();
     }
 
-    // ═══════════════════════════════════════════════════════════════
-    // Endpoint Registration
-    // ═══════════════════════════════════════════════════════════════
-
-    public void MapEndpoints(object app)
+    public void ConfigureApplication(ISharpClawApplicationBuilder application)
     {
-        var endpoints = (IEndpointRouteBuilder)app;
-        endpoints.MapEditorEndpoints();
-        endpoints.MapEditorSessionResourceEndpoints();
-    }
-
-    // ═══════════════════════════════════════════════════════════════
-    // CLI Commands
-    // ═══════════════════════════════════════════════════════════════
-
-    public IReadOnlyList<ModuleCliCommand> GetCliCommands() =>
-    [
-        new(
-            Name: "editorsession",
-            Aliases: ["editor", "es"],
-            Scope: ModuleCliScope.ResourceType,
-            Description: "Editor session CRUD",
-            UsageLines:
-            [
-                "resource editorsession list                      List all editor sessions",
-                "resource editorsession get <id>                  Show an editor session",
-                "resource editorsession delete <id>               Delete an editor session",
-            ],
-            Handler: HandleEditorSessionResourceCliAsync),
-    ];
-
-    public IReadOnlyList<ModuleResourceTypeDescriptor> GetResourceTypeDescriptors() =>
-    [
-        new("EditorSession", "EditorSession", "AccessEditorSessionAsync", static async (sp, ct) =>
+        application.Endpoints.AddHttp<EditorEndpointContribution>(
+            EditorEndpointContribution.SessionsRoute);
+        application.Endpoints.AddWebSocket<EditorWebSocketEndpointContribution>(
+            EditorWebSocketEndpointContribution.WebSocketRoute);
+        foreach (var route in EditorSessionEndpointContribution.EndpointRoutes)
+            application.Endpoints.AddHttp<EditorSessionEndpointContribution>(route);
+        foreach (var command in EditorCliHandler.Commands)
         {
-            var svc = sp.GetRequiredService<EditorSessionService>();
-            return [.. (await svc.ListAsync(ct)).Select(session => session.Id)];
-        },
-        LoadLookupItems: static async (sp, ct) =>
-        {
-            var svc = sp.GetRequiredService<EditorSessionService>();
-            return [.. (await svc.ListAsync(ct))
-                .Select(session => new ValueTuple<Guid, string>(session.Id, session.Name))];
-        }, DefaultResourceKey: "editor"),
-    ];
-
-    private static async Task HandleEditorSessionResourceCliAsync(
-        string[] args, IServiceProvider sp, CancellationToken ct)
-    {
-        var ids = sp.GetRequiredService<ICliIdResolver>();
-
-        if (args.Length < 3)
-        {
-            Console.Error.WriteLine("Usage:");
-            Console.Error.WriteLine("  resource editorsession list                      List all editor sessions");
-            Console.Error.WriteLine("  resource editorsession get <id>                  Show an editor session");
-            Console.Error.WriteLine("  resource editorsession delete <id>               Delete an editor session");
-            Console.Error.WriteLine();
-            Console.Error.WriteLine("Editor sessions are auto-created when an IDE extension connects.");
-            Console.Error.WriteLine("Use 'channel defaults <id> set editor <sessionId>' to assign one.");
-            return;
-        }
-
-        var sub = args[2].ToLowerInvariant();
-        var svc = sp.GetRequiredService<EditorSessionService>();
-
-        switch (sub)
-        {
-            case "get" when args.Length >= 4:
-                var session = await svc.GetByIdAsync(ids.Resolve(args[3]), ct);
-                if (session is null) { Console.Error.WriteLine("Not found."); return; }
-                ids.PrintJson(session);
-                break;
-            case "get":
-                Console.Error.WriteLine("resource editorsession get <id>");
-                break;
-
-            case "list":
-                ids.PrintJson(await svc.ListAsync(ct));
-                break;
-
-            case "delete" when args.Length >= 4:
-                Console.WriteLine(
-                    await svc.DeleteAsync(ids.Resolve(args[3]))
-                        ? "Done." : "Not found.");
-                break;
-            case "delete":
-                Console.Error.WriteLine("resource editorsession delete <id>");
-                break;
-
-            default:
-                Console.Error.WriteLine($"Unknown command: resource editorsession {sub}");
-                break;
+            application.Cli.Add<EditorCliHandler>(new ModuleCliCommandDescriptor(
+                command,
+                command.Equals("editorsession", StringComparison.Ordinal)
+                    ? ["editor", "es"]
+                    : [],
+                "Manage editor sessions.",
+                new JsonSchemaReference("sharpclaw.editor.cli.arguments", 1),
+                new JsonSchemaReference("sharpclaw.editor.cli.result", 1)));
         }
     }
 
-    // ═══════════════════════════════════════════════════════════════
-    // Header Tags
-    // ═══════════════════════════════════════════════════════════════
+    public ValueTask StartAsync(ModuleStartContext context, CancellationToken ct) =>
+        ValueTask.CompletedTask;
 
-    public IReadOnlyList<ModuleHeaderTag>? GetHeaderTags() =>
-    [
-        new ModuleHeaderTag(
-            Name: "editor",
-            Resolve: static (sp, ct) =>
-            {
-                var bridge = sp.GetRequiredService<EditorBridgeService>();
-                var connections = bridge.GetConnections();
-                if (connections.Count == 0)
-                    return Task.FromResult("(none)");
-
-                var sessions = string.Join(", ", connections.Select(c =>
-                {
-                    var s = c.EditorType.ToString();
-                    if (c.EditorVersion is not null) s += $" {c.EditorVersion}";
-                    if (c.WorkspacePath is not null) s += $" workspace={c.WorkspacePath}";
-                    return s;
-                }));
-                return Task.FromResult(sessions);
-            })
-    ];
-
-    // ═══════════════════════════════════════════════════════════════
-    // No LLM-callable tools
-    // ═══════════════════════════════════════════════════════════════
-
-    public IReadOnlyList<ModuleToolDefinition> GetToolDefinitions() => [];
-
-    public Task<string> ExecuteToolAsync(
-        string toolName, JsonElement parameters,
-        AgentJobContext job, IServiceProvider scopedServices,
-        CancellationToken ct) =>
-        throw new NotSupportedException(
-            $"EditorCommon does not expose LLM-callable tools (received '{toolName}').");
-
-    private static IReadOnlyList<ModuleStorageOperationDescriptor> StorageOperations() =>
-    [
-        new(ModuleStorageOperations.Get),
-        new(ModuleStorageOperations.Upsert),
-        new(ModuleStorageOperations.BatchUpsert),
-        new(ModuleStorageOperations.Delete),
-        new(ModuleStorageOperations.BatchDelete),
-        new(ModuleStorageOperations.List),
-        new(ModuleStorageOperations.Query),
-    ];
+    public ValueTask StopAsync(CancellationToken ct) => ValueTask.CompletedTask;
 }

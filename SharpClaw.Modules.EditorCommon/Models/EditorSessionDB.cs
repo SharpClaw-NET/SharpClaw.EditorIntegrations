@@ -14,11 +14,5 @@ public class EditorSessionDB : BaseEntity
     public string? WorkspacePath { get; set; }
     public string? Description { get; set; }
 
-    /// <summary>
-    /// The WebSocket connection ID for the currently connected editor.
-    /// Null when no editor is connected.
-    /// </summary>
-    public string? ConnectionId { get; set; }
-
     public Guid? SkillId { get; set; }
 }

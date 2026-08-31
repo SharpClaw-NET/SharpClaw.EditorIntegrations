@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <IsTestProject>true</IsTestProject>
+    <IsPackable>false</IsPackable>
+    <IsPublishable>false</IsPublishable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
+    <PackageReference Include="NUnit" />
+    <PackageReference Include="NUnit3TestAdapter" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\SharpClaw.Modules.EditorCommon\SharpClaw.Modules.EditorCommon.csproj" />
+    <ProjectReference Include="..\SharpClaw.Modules.VS2026Editor\SharpClaw.Modules.VS2026Editor.csproj" />
+    <ProjectReference Include="..\SharpClaw.Modules.VSCodeEditor\SharpClaw.Modules.VSCodeEditor.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\SharpClaw.Modules.EditorCommon\module.json" Link="manifests\editor-common.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\SharpClaw.Modules.VS2026Editor\module.json" Link="manifests\vs2026-editor.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\SharpClaw.Modules.VSCodeEditor\module.json" Link="manifests\vscode-editor.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

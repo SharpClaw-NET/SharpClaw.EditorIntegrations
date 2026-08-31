@@ -22,6 +22,7 @@ public sealed class EditorSessionStore
             storageGateway,
             ModuleId,
             StorageName,
+            "editor_session_store",
             JsonOptions);
     }
 

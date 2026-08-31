@@ -1,76 +1,64 @@
 using System.Collections.Concurrent;
-using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using Microsoft.Extensions.DependencyInjection;
 using SharpClaw.Contracts.DTOs.Editor;
+using SharpClaw.Contracts.Modules;
 using SharpClaw.Modules.EditorCommon.Models;
 
 namespace SharpClaw.Modules.EditorCommon.Services;
 
-/// <summary>
-/// Manages WebSocket connections to IDE extensions (VS 2026, VS Code).
-/// Routes editor action requests from the agent to the appropriate
-/// connected editor and waits for responses.
-/// <para>
-/// On connect the service auto-creates (or reuses) an
-/// <see cref="SharpClaw.Contracts.Entities.Core.Resources.EditorSessionDB"/>
-/// resource so agents can reference it immediately. On disconnect the
-/// <c>ConnectionId</c> is cleared but the resource persists for
-/// permission/default references.
-/// </para>
-/// </summary>
-public sealed class EditorBridgeService(IServiceScopeFactory scopeFactory)
+/// <summary>Manages neutral WebSocket channels for connected editor extensions.</summary>
+public sealed class EditorBridgeService
 {
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNameCaseInsensitive = true,
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) }
+        Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) },
     };
 
     private static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(30);
-
     private readonly ConcurrentDictionary<string, EditorConnection> _connections = new();
     private readonly ConcurrentDictionary<Guid, TaskCompletionSource<EditorActionResponse>> _pending = new();
 
-    /// <summary>
-    /// Returns all currently connected editors.
-    /// </summary>
     public IReadOnlyList<EditorConnection> GetConnections() =>
         _connections.Values.ToList();
 
-    /// <summary>
-    /// Returns the first connected editor, or <c>null</c> if none.
-    /// </summary>
     public EditorConnection? GetActiveConnection() =>
         _connections.Values.FirstOrDefault();
 
-    /// <summary>
-    /// Returns a connected editor by session ID, or <c>null</c>.
-    /// </summary>
     public EditorConnection? GetConnection(Guid sessionId) =>
-        _connections.Values.FirstOrDefault(c => c.SessionId == sessionId);
+        _connections.Values.FirstOrDefault(connection => connection.SessionId == sessionId);
 
-    /// <summary>
-    /// Sends an action request to the connected editor identified by
-    /// <paramref name="sessionId"/> and waits for the response.
-    /// </summary>
-    public async Task<EditorActionResponse> SendRequestAsync(
-        Guid sessionId, string action,
-        Dictionary<string, object?>? parameters = null,
-        CancellationToken ct = default)
+    public EditorConnection GetRequiredConnection(Guid sessionId, string expectedEditorKey)
     {
-        var conn = GetConnection(sessionId)
+        ArgumentException.ThrowIfNullOrWhiteSpace(expectedEditorKey);
+        var connection = GetConnection(sessionId)
             ?? throw new InvalidOperationException(
                 $"No editor connected with session {sessionId}.");
+        if (!string.Equals(
+                connection.EditorType.ToString(),
+                expectedEditorKey,
+                StringComparison.Ordinal))
+        {
+            throw new UnauthorizedAccessException(
+                $"Session {sessionId} is not connected to the expected editor.");
+        }
 
+        return connection;
+    }
+
+    internal async Task<EditorActionResponse> SendRequestAsync(
+        EditorConnection connection,
+        string action,
+        Dictionary<string, object?>? parameters,
+        CancellationToken cancellationToken)
+    {
         var request = new EditorActionRequest(Guid.NewGuid(), action, parameters);
-        var tcs = new TaskCompletionSource<EditorActionResponse>(
+        var completion = new TaskCompletionSource<EditorActionResponse>(
             TaskCreationOptions.RunContinuationsAsynchronously);
-
-        _pending[request.RequestId] = tcs;
+        _pending[request.RequestId] = completion;
 
         try
         {
@@ -79,19 +67,16 @@ public sealed class EditorBridgeService(IServiceScopeFactory scopeFactory)
                 type = "request",
                 requestId = request.RequestId,
                 action = request.Action,
-                @params = request.Params
+                @params = request.Params,
             }, JsonOptions);
+            await SendTextAsync(connection.Channel, json, cancellationToken);
 
-            await SendTextAsync(conn.Socket, json, ct);
-
-            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            timeoutCts.CancelAfter(RequestTimeout);
-
-            using var reg = timeoutCts.Token.Register(() =>
-                tcs.TrySetException(new TimeoutException(
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeout.CancelAfter(RequestTimeout);
+            using var registration = timeout.Token.Register(() =>
+                completion.TrySetException(new TimeoutException(
                     $"Editor did not respond to '{action}' within {RequestTimeout.TotalSeconds}s.")));
-
-            return await tcs.Task;
+            return await completion.Task;
         }
         finally
         {
@@ -99,175 +84,195 @@ public sealed class EditorBridgeService(IServiceScopeFactory scopeFactory)
         }
     }
 
-    /// <summary>
-    /// Handles a new WebSocket connection from an editor extension.
-    /// Auto-registers (or reuses) an <c>EditorSessionDB</c> resource,
-    /// then reads messages in a loop until the connection closes.
-    /// </summary>
     public async Task HandleConnectionAsync(
-        WebSocket socket, CancellationToken ct)
+        IModuleWebSocketChannel channel,
+        IHostActionEntry hostActionEntry,
+        HostActionEntryRequestContext hostContext,
+        EditorSessionActionGateway sessionActions,
+        CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(channel);
+        ArgumentNullException.ThrowIfNull(hostActionEntry);
+        ArgumentNullException.ThrowIfNull(hostContext);
+        ArgumentNullException.ThrowIfNull(sessionActions);
+
         string? connectionId = null;
-        Guid? sessionId = null;
+        var closeStatus = 1000;
+        var closeDescription = "Closing";
 
         try
         {
-            // First message must be a registration
-            var regJson = await ReceiveTextAsync(socket, ct);
-            if (regJson is null) return;
+            var registrationJson = await ReceiveTextAsync(channel, cancellationToken);
+            if (registrationJson is null)
+                return;
 
-            var regMsg = JsonSerializer.Deserialize<RegistrationEnvelope>(regJson, JsonOptions);
-            if (regMsg?.Type != "register")
+            RegistrationEnvelope? registration;
+            try
             {
-                await socket.CloseAsync(WebSocketCloseStatus.ProtocolError,
-                    "First message must be a registration", ct);
+                registration = JsonSerializer.Deserialize<RegistrationEnvelope>(
+                    registrationJson,
+                    JsonOptions);
+            }
+            catch (JsonException)
+            {
+                closeStatus = 1002;
+                closeDescription = "Registration is not valid JSON";
+                return;
+            }
+
+            if (registration?.Type != "register" ||
+                string.IsNullOrWhiteSpace(registration.EditorKey))
+            {
+                closeStatus = 1002;
+                closeDescription = "First message must be a registration";
                 return;
             }
 
             connectionId = Guid.NewGuid().ToString("N");
-
-            // Parse the string key to the internal enum; fall back to Other for unknown keys.
-            var editorType = Enum.TryParse<EditorType>(regMsg.EditorKey, ignoreCase: true, out var et)
-                ? et
+            var editorType = Enum.TryParse<EditorType>(
+                registration.EditorKey,
+                ignoreCase: true,
+                out var parsed)
+                ? parsed
                 : EditorType.Other;
+            var workspaceName = registration.WorkspacePath is null
+                ? null
+                : Path.GetFileName(registration.WorkspacePath);
+            var name = registration.EditorKey
+                + (workspaceName is null ? string.Empty : $" - {workspaceName}");
+            var sessionResult = await sessionActions.ExecuteAsync(
+                hostActionEntry,
+                hostContext,
+                new EditorSessionAction(
+                    EditorSessionOperation.GetOrCreate,
+                    null,
+                    JsonSerializer.SerializeToElement(new CreateEditorSessionRequest(
+                        name,
+                        registration.EditorKey,
+                        registration.EditorVersion,
+                        registration.WorkspacePath))),
+                cancellationToken);
+            var session = sessionResult.Deserialize<EditorSessionResponse>(JsonOptions)
+                ?? throw new InvalidOperationException(
+                    "The editor session action returned an invalid session.");
 
-            // Auto-register the session resource in the database
-            using (var scope = scopeFactory.CreateScope())
-            {
-                var sessionSvc = scope.ServiceProvider.GetRequiredService<EditorSessionService>();
-                var workspaceName = regMsg.WorkspacePath is not null
-                    ? Path.GetFileName(regMsg.WorkspacePath)
-                    : null;
-                var name = $"{regMsg.EditorKey}"
-                    + (workspaceName is not null ? $" — {workspaceName}" : "");
-
-                var session = await sessionSvc.GetOrCreateAsync(
-                    name, editorType, regMsg.EditorVersion,
-                    regMsg.WorkspacePath, ct);
-
-                sessionId = session.Id;
-                await sessionSvc.SetConnectionIdAsync(session.Id, connectionId, ct);
-            }
-
-            var conn = new EditorConnection(
+            var connection = new EditorConnection(
                 connectionId,
-                sessionId.Value,
+                session.Id,
                 editorType,
-                regMsg.EditorVersion,
-                regMsg.WorkspacePath,
-                socket,
+                registration.EditorVersion,
+                registration.WorkspacePath,
+                channel,
+                "Open",
                 DateTimeOffset.UtcNow);
+            _connections[connectionId] = connection;
 
-            _connections[connectionId] = conn;
-
-            // Send acknowledgement
-            await SendTextAsync(socket, JsonSerializer.Serialize(new
+            await SendTextAsync(channel, JsonSerializer.Serialize(new
             {
                 type = "registered",
-                sessionId = conn.SessionId,
-                connectionId
-            }, JsonOptions), ct);
+                sessionId = connection.SessionId,
+                connectionId,
+            }, JsonOptions), cancellationToken);
 
-            // Read loop
-            while (socket.State == WebSocketState.Open && !ct.IsCancellationRequested)
+            while (!cancellationToken.IsCancellationRequested)
             {
-                var json = await ReceiveTextAsync(socket, ct);
-                if (json is null) break;
+                var json = await ReceiveTextAsync(channel, cancellationToken);
+                if (json is null)
+                    break;
 
                 var envelope = JsonSerializer.Deserialize<ResponseEnvelope>(json, JsonOptions);
-                if (envelope?.Type == "response" && envelope.RequestId.HasValue)
+                if (envelope?.Type == "response" &&
+                    envelope.RequestId is { } requestId &&
+                    _pending.TryGetValue(requestId, out var completion))
                 {
-                    if (_pending.TryGetValue(envelope.RequestId.Value, out var tcs))
-                    {
-                        tcs.TrySetResult(new EditorActionResponse(
-                            envelope.RequestId.Value,
-                            envelope.Success,
-                            envelope.Data,
-                            envelope.Error));
-                    }
+                    completion.TrySetResult(new EditorActionResponse(
+                        requestId,
+                        envelope.Success,
+                        envelope.Data,
+                        envelope.Error));
                 }
             }
         }
-        catch (WebSocketException) { /* connection dropped */ }
-        catch (OperationCanceledException) { /* server shutting down */ }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+        }
         finally
         {
             if (connectionId is not null)
                 _connections.TryRemove(connectionId, out _);
-
-            // Clear the ConnectionId on the session so it shows as disconnected
-            if (sessionId.HasValue)
-            {
-                try
-                {
-                    using var scope = scopeFactory.CreateScope();
-                    var sessionSvc = scope.ServiceProvider.GetRequiredService<EditorSessionService>();
-                    await sessionSvc.SetConnectionIdAsync(sessionId.Value, null);
-                }
-                catch { /* best effort cleanup */ }
-            }
-
-            if (socket.State is WebSocketState.Open or WebSocketState.CloseReceived)
-            {
-                try
-                {
-                    await socket.CloseAsync(
-                        WebSocketCloseStatus.NormalClosure, "Closing", CancellationToken.None);
-                }
-                catch { /* best effort */ }
-            }
+            await CloseBestEffortAsync(channel, closeStatus, closeDescription);
         }
     }
 
-    // ── Internal message types ────────────────────────────────────
+    private static async Task SendTextAsync(
+        IModuleWebSocketChannel channel,
+        string text,
+        CancellationToken cancellationToken) =>
+        await channel.SendAsync(
+            new ModuleWebSocketMessage(
+                ModuleWebSocketMessageType.Text,
+                Encoding.UTF8.GetBytes(text)),
+            cancellationToken);
+
+    private static async Task<string?> ReceiveTextAsync(
+        IModuleWebSocketChannel channel,
+        CancellationToken cancellationToken)
+    {
+        var message = await channel.ReceiveAsync(cancellationToken);
+        if (message is null || message.Type == ModuleWebSocketMessageType.Close)
+            return null;
+        if (message.Type != ModuleWebSocketMessageType.Text)
+            throw new InvalidDataException("The editor bridge accepts text messages only.");
+        return Encoding.UTF8.GetString(message.Payload);
+    }
+
+    private static async Task CloseBestEffortAsync(
+        IModuleWebSocketChannel channel,
+        int closeStatus,
+        string closeDescription)
+    {
+        try
+        {
+            await channel.CloseAsync(closeStatus, closeDescription, CancellationToken.None);
+        }
+        catch
+        {
+        }
+    }
 
     private sealed class RegistrationEnvelope
     {
         public string? Type { get; set; }
-        public string EditorKey { get; set; } = "";
+
+        [JsonPropertyName("editorType")]
+        public string EditorKey { get; set; } = string.Empty;
+
         public string? EditorVersion { get; set; }
+
         public string? WorkspacePath { get; set; }
     }
 
     private sealed class ResponseEnvelope
     {
         public string? Type { get; set; }
+
         public Guid? RequestId { get; set; }
+
         public bool Success { get; set; }
+
         public string? Data { get; set; }
+
         public string? Error { get; set; }
-    }
-
-    // ── WebSocket helpers ─────────────────────────────────────────
-
-    private static async Task SendTextAsync(
-        WebSocket socket, string text, CancellationToken ct)
-    {
-        var bytes = Encoding.UTF8.GetBytes(text);
-        await socket.SendAsync(bytes, WebSocketMessageType.Text, true, ct);
-    }
-
-    private static async Task<string?> ReceiveTextAsync(
-        WebSocket socket, CancellationToken ct)
-    {
-        var buffer = new byte[64 * 1024];
-        var result = await socket.ReceiveAsync(buffer, ct);
-
-        if (result.MessageType == WebSocketMessageType.Close)
-            return null;
-
-        return Encoding.UTF8.GetString(buffer, 0, result.Count);
     }
 }
 
-/// <summary>
-/// Represents an active WebSocket connection to an IDE extension.
-/// </summary>
+/// <summary>Represents one active neutral editor connection.</summary>
 public sealed record EditorConnection(
     string ConnectionId,
     Guid SessionId,
     EditorType EditorType,
     string? EditorVersion,
     string? WorkspacePath,
-    WebSocket Socket,
+    IModuleWebSocketChannel Channel,
+    string State,
     DateTimeOffset ConnectedAt);

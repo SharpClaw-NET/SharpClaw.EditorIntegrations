@@ -18,11 +18,8 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <FrameworkReference Include="Microsoft.AspNetCore.App" />
-  </ItemGroup>
-
-  <ItemGroup>
     <PackageReference Include="SharpClaw.Contracts" />
+    <PackageReference Include="SharpClaw.ModuleSDK" />
   </ItemGroup>
 
   <ItemGroup>

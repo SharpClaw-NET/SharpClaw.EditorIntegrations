@@ -19,6 +19,11 @@
 
   <ItemGroup>
     <PackageReference Include="SharpClaw.Contracts" />
+    <PackageReference Include="SharpClaw.ModuleSDK" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\SharpClaw.Modules.EditorCommon\SharpClaw.Modules.EditorCommon.csproj" />
   </ItemGroup>
 
   <ItemGroup>

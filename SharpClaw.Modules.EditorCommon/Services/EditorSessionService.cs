@@ -70,16 +70,8 @@ public sealed class EditorSessionService(EditorSessionStore store)
         CancellationToken ct = default)
         => await store.GetOrCreateAsync(name, editorType, editorVersion, workspacePath, ct);
 
-    public async Task SetConnectionIdAsync(
-        Guid id,
-        string? connectionId,
-        CancellationToken ct = default)
-    {
-        await store.UpdateAsync(id, session => session.ConnectionId = connectionId, ct);
-    }
-
     internal static EditorSessionResponse ToResponse(EditorSessionDB s) =>
         new(s.Id, s.Name, s.EditorType.ToString(), s.EditorVersion,
             s.WorkspacePath, s.Description,
-            s.ConnectionId is not null, s.CreatedAt);
+            false, s.CreatedAt);
 }

@@ -1,61 +1,90 @@
-using System.Net.WebSockets;
-using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Builder;
-using Microsoft.AspNetCore.Http;
-using Microsoft.AspNetCore.Routing;
+using System.Text.Json;
+using SharpClaw.Contracts.Modules;
 using SharpClaw.Modules.EditorCommon.Services;
 
 namespace SharpClaw.Modules.EditorCommon.Handlers;
 
-/// <summary>
-/// WebSocket endpoint for IDE extension connections and REST
-/// endpoints for querying connected editor sessions.
-/// </summary>
-internal static class EditorHandlers
+/// <summary>Lists active editor bridge connections through a typed action.</summary>
+public sealed class EditorEndpointContribution(EditorBridgeActionGateway bridge)
+    : IModuleHttpEndpointHandler
 {
-    internal static void MapEditorEndpoints(this IEndpointRouteBuilder routes)
-    {
-        var group = routes.MapGroup("/editor");
+    public static ModuleEndpointRouteDescriptor SessionsRoute { get; } = new(
+        "editor.connections.list",
+        "/editor/sessions",
+        "GET",
+        HostEndpointTransport.Http);
 
-        group.Map("/ws", HandleWebSocket).AllowAnonymous();
-        group.MapGet("/sessions", ListSessions);
-    }
-
-    /// <summary>
-    /// WebSocket upgrade endpoint. Extensions connect here and send a
-    /// registration message, then enter a request/response loop managed
-    /// by <see cref="EditorBridgeService"/>.
-    /// </summary>
-    private static async Task HandleWebSocket(
-        HttpContext context,
-        EditorBridgeService bridge)
+    public async ValueTask<ModuleHttpEndpointResponse> InvokeAsync(
+        HostEndpointRouteRequest request,
+        IHostActionEntry hostActionEntry,
+        CancellationToken cancellationToken)
     {
-        if (!context.WebSockets.IsWebSocketRequest)
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(hostActionEntry);
+
+        if (!SessionsRoute.ToRouteIdentity().Equals(request.Route))
+            return Error(404, "endpoint_route_not_found");
+
+        try
         {
-            context.Response.StatusCode = 400;
-            await context.Response.WriteAsync("WebSocket connections only.");
-            return;
+            var result = await bridge.ReadAsync(
+                hostActionEntry,
+                request.Invocation.HostActionContext,
+                sessionId: null,
+                cancellationToken);
+            return ModuleHttpEndpointResponse.Json(
+                200,
+                JsonSerializer.SerializeToElement(result.Connections, EditorJson.Options));
         }
-
-        using var socket = await context.WebSockets.AcceptWebSocketAsync();
-        await bridge.HandleConnectionAsync(socket, context.RequestAborted);
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Error(403, "endpoint_forbidden");
+        }
+        catch (InvalidOperationException)
+        {
+            return Error(500, "endpoint_failed");
+        }
     }
 
-    /// <summary>
-    /// Lists all currently connected editor sessions.
-    /// </summary>
-    private static IResult ListSessions(EditorBridgeService bridge)
+    private static ModuleHttpEndpointResponse Error(int statusCode, string code) =>
+        ModuleHttpEndpointResponse.Json(
+            statusCode,
+            JsonSerializer.SerializeToElement(new { error = code }));
+}
+
+/// <summary>Runs the neutral editor WebSocket route.</summary>
+public sealed class EditorWebSocketEndpointContribution(
+    EditorSessionActionGateway sessions,
+    EditorBridgeService bridge) : IModuleWebSocketEndpointHandler
+{
+    public static ModuleEndpointRouteDescriptor WebSocketRoute { get; } = new(
+        "editor.websocket",
+        "/editor/ws",
+        "GET",
+        HostEndpointTransport.WebSocket);
+
+    public ValueTask InvokeAsync(
+        HostEndpointRouteRequest request,
+        IModuleWebSocketChannel channel,
+        IHostActionEntry hostActionEntry,
+        CancellationToken cancellationToken)
     {
-        var connections = bridge.GetConnections();
-        var sessions = connections.Select(c => new
-        {
-            c.SessionId,
-            c.EditorType,
-            c.EditorVersion,
-            c.WorkspacePath,
-            IsConnected = c.Socket.State == WebSocketState.Open,
-            c.ConnectedAt
-        });
-        return Results.Ok(sessions);
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(channel);
+        ArgumentNullException.ThrowIfNull(hostActionEntry);
+
+        if (!WebSocketRoute.ToRouteIdentity().Equals(request.Route))
+            throw new InvalidOperationException("The editor WebSocket route is not registered.");
+
+        return new ValueTask(bridge.HandleConnectionAsync(
+            channel,
+            hostActionEntry,
+            request.Invocation.HostActionContext,
+            sessions,
+            cancellationToken));
     }
 }
