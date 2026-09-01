@@ -289,8 +289,11 @@ public sealed class EditorChatContextContributor(EditorBridgeService bridge)
 {
     public ValueTask<ChatContextContribution> ContributeAsync(
         ChatContextRequest request,
+        ChatOperationContext context,
         CancellationToken ct)
     {
+        ArgumentNullException.ThrowIfNull(context);
+        ct.ThrowIfCancellationRequested();
         var connections = bridge.GetConnections();
         var summary = connections.Count == 0
             ? "(none)"

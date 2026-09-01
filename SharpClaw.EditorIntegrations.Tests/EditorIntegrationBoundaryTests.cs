@@ -39,6 +39,7 @@ public sealed class EditorIntegrationBoundaryTests
                 EditorProtocolContracts.BridgeRequestMutationActionName,
                 EditorProtocolContracts.SessionReadActionName,
                 EditorProtocolContracts.SessionMutationActionName,
+                SidecarChatActionDescriptors.ContextContributor.Key.Value,
             }));
         Assert.That(graph.Application.Endpoints, Has.Count.EqualTo(7));
         Assert.That(graph.Application.Endpoints.Select(item => item.HandlerType),
@@ -59,7 +60,7 @@ public sealed class EditorIntegrationBoundaryTests
                 "/resources/editorsessions/{id}",
             }));
         Assert.That(graph.Application.CliCommands.Select(item => item.Descriptor.Name), Is.EqualTo(["editorsession"]));
-        Assert.That(graph.Application.ActionEntries, Has.Count.EqualTo(5));
+        Assert.That(graph.Application.ActionEntries, Has.Count.EqualTo(6));
         Assert.That(
             graph.Application.ActionEntries.Select(item => item.Descriptor.Key.Value),
             Is.EquivalentTo(graph.Actions.Select(item => item.Descriptor.Key.Value)));
@@ -72,7 +73,13 @@ public sealed class EditorIntegrationBoundaryTests
                 EditorProtocolContracts.BridgeRequestMutationTerminalId,
                 EditorProtocolContracts.SessionReadTerminalId,
                 EditorProtocolContracts.SessionMutationTerminalId,
+                SidecarChatActionDescriptors.ContextContributorTerminalId,
             }));
+        var chat = graph.CreateSidecarApplicationDiscovery().Chat;
+        Assert.That(chat.Select(item => item.Kind), Is.EqualTo(new[]
+        {
+            SidecarChatContributionKind.ContextContributor,
+        }));
         Assert.That(graph.Contracts.Single(item => item.IsExport).ContractName,
             Is.EqualTo(EditorProtocolContracts.ContractName));
     }
@@ -101,6 +108,32 @@ public sealed class EditorIntegrationBoundaryTests
             Is.True);
         Assert.That(EditorProtocolContracts.SessionMutationDescriptor.RepeatPolicy.Kind,
             Is.EqualTo(ActionRepeatKind.None));
+    }
+
+    [Test]
+    public void ChatContributorRejectsCancellationBeforeReadingConnections()
+    {
+        var contributor = new EditorChatContextContributor(new EditorBridgeService());
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+        var now = DateTimeOffset.UtcNow;
+        var context = new ChatOperationContext(
+            Guid.NewGuid(),
+            null,
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            0,
+            1,
+            now.AddMinutes(1),
+            new RequestPrincipal("editor-user"),
+            ExtensionFeatureSet.Empty);
+        var request = new ChatContextRequest(
+            Guid.NewGuid(),
+            new ChatProfile("provider", Guid.NewGuid()),
+            []);
+
+        Assert.ThrowsAsync<OperationCanceledException>(async () =>
+            await contributor.ContributeAsync(request, context, cancellation.Token));
     }
 
     [Test]
