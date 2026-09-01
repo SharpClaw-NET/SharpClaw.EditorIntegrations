@@ -1,7 +1,7 @@
 {
   "id": "sharpclaw_editor_common",
   "displayName": "Editor Common",
-  "version": "0.1.3-alpha",
+  "version": "0.1.4-alpha",
   "toolPrefix": "edc",
   "runtime": "dotnet",
   "hostMode": "sidecar",
