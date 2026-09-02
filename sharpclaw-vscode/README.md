@@ -15,4 +15,4 @@ file path.
 
 The extension source and issue tracker live in the SharpClaw.EditorIntegrations
 repository at
-[https://github.com/mkn8rn/SharpClaw.EditorIntegrations](https://github.com/mkn8rn/SharpClaw.EditorIntegrations).
+[https://github.com/SharpClaw-NET/SharpClaw.EditorIntegrations](https://github.com/SharpClaw-NET/SharpClaw.EditorIntegrations).

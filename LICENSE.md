@@ -22,7 +22,7 @@ WRITTEN OFFER
 The source code for any program binaries or compressed scripts that are
 included with SharpClaw.EditorIntegrations can be freely obtained at the
 following URL:
-https://github.com/mkn8rn/SharpClaw.EditorIntegrations
+https://github.com/SharpClaw-NET/SharpClaw.EditorIntegrations
 
 =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
 
