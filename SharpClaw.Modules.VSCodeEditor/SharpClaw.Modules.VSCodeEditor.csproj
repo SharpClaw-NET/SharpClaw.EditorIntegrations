@@ -27,7 +27,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Content Include="module.json" Link="modules\sharpclaw_vscode_editor\module.json" CopyToOutputDirectory="PreserveNewest" Pack="true" PackagePath="sharpclaw\" />
+    <Content Include="package.json" Link="contributions\sharpclaw_vscode_editor\package.json" CopyToOutputDirectory="PreserveNewest" Pack="true" PackagePath="sharpclaw\" />
   </ItemGroup>
 
   <ItemGroup>

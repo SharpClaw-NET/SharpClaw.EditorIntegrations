@@ -1,13 +1,13 @@
 using System.Text.Json;
 using SharpClaw.Contracts.DTOs.Editor;
-using SharpClaw.Contracts.Modules;
+using SharpClaw.Contracts.Kernel;
 using SharpClaw.Modules.EditorCommon.Services;
 
 namespace SharpClaw.Modules.EditorCommon.Handlers;
 
 /// <summary>Runs editor session HTTP routes through typed actions.</summary>
 public sealed class EditorSessionEndpointContribution(EditorSessionActionGateway sessions)
-    : IModuleHttpEndpointHandler
+    : IHttpEndpointHandler
 {
     private static readonly JsonElement EmptyPayload =
         JsonSerializer.SerializeToElement(new { });
@@ -21,10 +21,10 @@ public sealed class EditorSessionEndpointContribution(EditorSessionActionGateway
         Route("editor.sessions.delete", "/resources/editorsessions/{id}", "DELETE", EditorSessionOperation.Delete),
     ];
 
-    public static IReadOnlyList<ModuleEndpointRouteDescriptor> EndpointRoutes { get; } =
+    public static IReadOnlyList<EndpointRouteDescriptor> EndpointRoutes { get; } =
         Routes.Select(route => route.Descriptor).ToArray();
 
-    public async ValueTask<ModuleHttpEndpointResponse> InvokeAsync(
+    public async ValueTask<HttpEndpointResponse> InvokeAsync(
         HostEndpointRouteRequest request,
         IHostActionEntry hostActionEntry,
         CancellationToken cancellationToken)
@@ -81,7 +81,7 @@ public sealed class EditorSessionEndpointContribution(EditorSessionActionGateway
         string method,
         EditorSessionOperation operation) =>
         new(
-            new ModuleEndpointRouteDescriptor(id, path, method, HostEndpointTransport.Http),
+            new EndpointRouteDescriptor(id, path, method, HostEndpointTransport.Http),
             operation,
             path.Contains("{id}", StringComparison.Ordinal));
 
@@ -108,33 +108,33 @@ public sealed class EditorSessionEndpointContribution(EditorSessionActionGateway
         return JsonSerializer.SerializeToElement(value, EditorJson.Options);
     }
 
-    private static ModuleHttpEndpointResponse ToResponse(
+    private static HttpEndpointResponse ToResponse(
         EditorSessionOperation operation,
         JsonElement result)
     {
         if (operation is EditorSessionOperation.Get or EditorSessionOperation.Update &&
             result.ValueKind == JsonValueKind.Null)
         {
-            return ModuleHttpEndpointResponse.Empty(404);
+            return HttpEndpointResponse.Empty(404);
         }
 
         if (operation == EditorSessionOperation.Delete)
         {
             return result.ValueKind == JsonValueKind.True && result.GetBoolean()
-                ? ModuleHttpEndpointResponse.Empty(204)
-                : ModuleHttpEndpointResponse.Empty(404);
+                ? HttpEndpointResponse.Empty(204)
+                : HttpEndpointResponse.Empty(404);
         }
 
-        return ModuleHttpEndpointResponse.Json(200, result);
+        return HttpEndpointResponse.Json(200, result);
     }
 
-    private static ModuleHttpEndpointResponse Error(int statusCode, string code) =>
-        ModuleHttpEndpointResponse.Json(
+    private static HttpEndpointResponse Error(int statusCode, string code) =>
+        HttpEndpointResponse.Json(
             statusCode,
             JsonSerializer.SerializeToElement(new { error = code }));
 
     private sealed record RouteDefinition(
-        ModuleEndpointRouteDescriptor Descriptor,
+        EndpointRouteDescriptor Descriptor,
         EditorSessionOperation Operation,
         bool RequiresId);
 }

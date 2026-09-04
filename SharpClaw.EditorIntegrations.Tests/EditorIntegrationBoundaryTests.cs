@@ -4,7 +4,7 @@ using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using NUnit.Framework;
 using SharpClaw.Contracts.DTOs.Editor;
-using SharpClaw.Contracts.Modules;
+using SharpClaw.Contracts.Kernel;
 using SharpClaw.ModuleSDK;
 using SharpClaw.Modules.EditorCommon;
 using SharpClaw.Modules.EditorCommon.Handlers;
@@ -396,7 +396,7 @@ public sealed class EditorIntegrationBoundaryTests
         var bridge = new EditorBridgeService();
         var host = new RecordingHostActionEntry();
         var services = new ServiceCollection();
-        services.AddSingleton<IModuleStorageGateway>(storage);
+        services.AddSingleton<IScopedStorageGateway>(storage);
         services.AddSingleton(bridge);
         services.AddScoped<EditorSessionStore>();
         services.AddScoped<EditorSessionService>();
@@ -410,7 +410,7 @@ public sealed class EditorIntegrationBoundaryTests
         var invocationId = Guid.NewGuid();
 
         var result = await handler.ExecuteAsync(
-            new ModuleCliInvocation(
+            new CliInvocation(
                 invocationId,
                 "editorsession",
                 ["list"],
@@ -434,8 +434,7 @@ public sealed class EditorIntegrationBoundaryTests
         cancellation.Cancel();
 
         await module.StartAsync(
-            new ModuleStartContext(
-                module.Identity,
+            new ServiceStartContext(
                 "test-host",
                 "test-contract",
                 ExtensionFeatureSet.Empty),
@@ -451,7 +450,7 @@ public sealed class EditorIntegrationBoundaryTests
             TestContext.CurrentContext.TestDirectory,
             "manifests",
             manifestName);
-        var manifest = JsonSerializer.Deserialize<ModuleManifest>(
+        var manifest = JsonSerializer.Deserialize<PackageManifest>(
             File.ReadAllText(manifestPath),
             JsonOptions)!;
         return SharpClawModuleCompiler.Compile(
@@ -463,9 +462,9 @@ public sealed class EditorIntegrationBoundaryTests
     private static void AssertTools(
         ModuleContributionGraph graph,
         string prefix,
-        string moduleId)
+        string SourceId)
     {
-        Assert.That(graph.Identity.Id, Is.EqualTo(moduleId));
+        Assert.That(graph.Identity.Id, Is.EqualTo(SourceId));
         Assert.That(graph.Tools, Has.Count.EqualTo(11));
         Assert.That(graph.Tools.Select(item => item.Descriptor.Name),
             Has.All.StartsWith(prefix));
@@ -496,7 +495,7 @@ public sealed class EditorIntegrationBoundaryTests
             new ActionPipelineSnapshot("editor-tests", []));
 
     private static HostEndpointRouteRequest EndpointRequest(
-        ModuleEndpointRouteDescriptor descriptor,
+        EndpointRouteDescriptor descriptor,
         byte[]? body = null)
     {
         var context = Context();
@@ -525,58 +524,58 @@ public sealed class EditorIntegrationBoundaryTests
             DateTimeOffset.UtcNow.AddMinutes(1),
             DateTimeOffset.UtcNow.AddMinutes(2));
 
-    private sealed class RecordingStorageGateway : IModuleStorageGateway
+    private sealed class RecordingStorageGateway : IScopedStorageGateway
     {
         public int TotalCalls { get; private set; }
         public int UpsertCalls { get; private set; }
 
-        public IReadOnlyList<ModuleStorageContractDescriptor> ListContracts() => [];
+        public IReadOnlyList<ScopedStorageContractDescriptor> ListContracts() => [];
 
         public Task<JsonElement> InvokeAsync(
-            string moduleId,
+            string SourceId,
             string storageName,
             string operation,
             JsonElement parameters,
             CancellationToken ct = default)
         {
             TotalCalls++;
-            if (operation == ModuleStorageOperations.Upsert)
+            if (operation == ScopedStorageOperations.Upsert)
                 UpsertCalls++;
             return Task.FromResult(operation switch
             {
-                ModuleStorageOperations.List or ModuleStorageOperations.Query =>
+                ScopedStorageOperations.List or ScopedStorageOperations.Query =>
                     JsonSerializer.SerializeToElement(new { records = Array.Empty<object>() }),
-                ModuleStorageOperations.Get => JsonSerializer.SerializeToElement(new { found = false }),
-                ModuleStorageOperations.Delete => JsonSerializer.SerializeToElement(new { deleted = false }),
+                ScopedStorageOperations.Get => JsonSerializer.SerializeToElement(new { found = false }),
+                ScopedStorageOperations.Delete => JsonSerializer.SerializeToElement(new { deleted = false }),
                 _ => JsonSerializer.SerializeToElement(new { saved = 1 }),
             });
         }
 
-        public Task<ModuleStorageMutationAndOutboxResult> CommitMutationAndOutboxAsync(
-            string moduleId,
+        public Task<ScopedStorageMutationAndOutboxResult> CommitMutationAndOutboxAsync(
+            string SourceId,
             string storageName,
-            ModuleStorageMutationAndOutboxRequest request,
+            ScopedStorageMutationAndOutboxRequest request,
             CancellationToken ct = default) =>
             throw new NotSupportedException();
 
-        public Task<ModuleStorageClaimResult<T>> ClaimAsync<T>(
-            string moduleId,
+        public Task<ScopedStorageClaimResult<T>> ClaimAsync<T>(
+            string SourceId,
             string storageName,
-            ModuleStorageClaimRequest request,
+            ScopedStorageClaimRequest request,
             CancellationToken ct = default) =>
             throw new NotSupportedException();
 
-        public Task<ModuleStorageClaimRenewalResult> RenewClaimAsync(
-            string moduleId,
+        public Task<ScopedStorageClaimRenewalResult> RenewClaimAsync(
+            string SourceId,
             string storageName,
-            ModuleStorageClaimRenewalRequest request,
+            ScopedStorageClaimRenewalRequest request,
             CancellationToken ct = default) =>
             throw new NotSupportedException();
 
-        public Task<ModuleStorageClaimRecoveryResult> RecoverClaimAsync(
-            string moduleId,
+        public Task<ScopedStorageClaimRecoveryResult> RecoverClaimAsync(
+            string SourceId,
             string storageName,
-            ModuleStorageClaimRecoveryRequest request,
+            ScopedStorageClaimRecoveryRequest request,
             CancellationToken ct = default) =>
             throw new NotSupportedException();
     }
@@ -696,19 +695,19 @@ public sealed class EditorIntegrationBoundaryTests
         public ActionUncertainty? Uncertainty => null;
     }
 
-    private sealed class ScriptedWebSocketChannel : IModuleWebSocketChannel
+    private sealed class ScriptedWebSocketChannel : IWebSocketChannel
     {
-        private readonly Queue<ModuleWebSocketMessage?> _messages;
+        private readonly Queue<WebSocketMessage?> _messages;
 
         public ScriptedWebSocketChannel(string registration)
         {
-            _messages = new Queue<ModuleWebSocketMessage?>(
+            _messages = new Queue<WebSocketMessage?>(
             [
-                new ModuleWebSocketMessage(
-                    ModuleWebSocketMessageType.Text,
+                new WebSocketMessage(
+                    WebSocketMessageType.Text,
                     Encoding.UTF8.GetBytes(registration)),
-                new ModuleWebSocketMessage(
-                    ModuleWebSocketMessageType.Close,
+                new WebSocketMessage(
+                    WebSocketMessageType.Close,
                     [],
                     1000,
                     "Complete"),
@@ -718,7 +717,7 @@ public sealed class EditorIntegrationBoundaryTests
         public List<string> SentMessages { get; } = [];
         public int CloseCalls { get; private set; }
 
-        public ValueTask<ModuleWebSocketMessage?> ReceiveAsync(
+        public ValueTask<WebSocketMessage?> ReceiveAsync(
             CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -727,11 +726,11 @@ public sealed class EditorIntegrationBoundaryTests
         }
 
         public ValueTask SendAsync(
-            ModuleWebSocketMessage message,
+            WebSocketMessage message,
             CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            Assert.That(message.Type, Is.EqualTo(ModuleWebSocketMessageType.Text));
+            Assert.That(message.Type, Is.EqualTo(WebSocketMessageType.Text));
             SentMessages.Add(Encoding.UTF8.GetString(message.Payload));
             return ValueTask.CompletedTask;
         }

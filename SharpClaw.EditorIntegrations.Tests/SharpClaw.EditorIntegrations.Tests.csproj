@@ -20,9 +20,9 @@
   </ItemGroup>
 
   <ItemGroup>
-    <None Include="..\SharpClaw.Modules.EditorCommon\module.json" Link="manifests\editor-common.json" CopyToOutputDirectory="PreserveNewest" />
-    <None Include="..\SharpClaw.Modules.VS2026Editor\module.json" Link="manifests\vs2026-editor.json" CopyToOutputDirectory="PreserveNewest" />
-    <None Include="..\SharpClaw.Modules.VSCodeEditor\module.json" Link="manifests\vscode-editor.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\SharpClaw.Modules.EditorCommon\package.json" Link="manifests\editor-common.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\SharpClaw.Modules.VS2026Editor\package.json" Link="manifests\vs2026-editor.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\SharpClaw.Modules.VSCodeEditor\package.json" Link="manifests\vscode-editor.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

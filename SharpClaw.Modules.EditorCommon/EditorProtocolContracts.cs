@@ -1,6 +1,6 @@
 using System.Text.Json;
 using SharpClaw.Contracts.DTOs.Editor;
-using SharpClaw.Contracts.Modules;
+using SharpClaw.Contracts.Kernel;
 using SharpClaw.ModuleSDK;
 
 namespace SharpClaw.Modules.EditorCommon;
@@ -138,28 +138,28 @@ public static class EditorProtocolContracts
             true,
             MutationRepeatPolicy);
 
-    private static readonly IReadOnlyList<ModuleStorageOperationDescriptor> StorageOperations =
+    private static readonly IReadOnlyList<ScopedStorageOperationDescriptor> StorageOperations =
     [
-        new(ModuleStorageOperations.Get),
-        new(ModuleStorageOperations.Upsert),
-        new(ModuleStorageOperations.BatchUpsert),
-        new(ModuleStorageOperations.Delete),
-        new(ModuleStorageOperations.BatchDelete),
-        new(ModuleStorageOperations.List),
-        new(ModuleStorageOperations.Query),
+        new(ScopedStorageOperations.Get),
+        new(ScopedStorageOperations.Upsert),
+        new(ScopedStorageOperations.BatchUpsert),
+        new(ScopedStorageOperations.Delete),
+        new(ScopedStorageOperations.BatchDelete),
+        new(ScopedStorageOperations.List),
+        new(ScopedStorageOperations.Query),
     ];
 
-    public static ModuleStorageContractDescriptor SessionStorage { get; } =
+    public static ScopedStorageContractDescriptor SessionStorage { get; } =
         new(
             EditorCommonModuleId,
             "editor_sessions",
             StorageOperations,
             "Editor session records keyed by connected editor workspace.",
             [
-                new("name", ModuleStorageIndexValueKind.String),
-                new("editorType", ModuleStorageIndexValueKind.String),
-                new("workspacePath", ModuleStorageIndexValueKind.String),
-                new("editorWorkspace", ModuleStorageIndexValueKind.String),
+                new("name", ScopedStorageIndexValueKind.String),
+                new("editorType", ScopedStorageIndexValueKind.String),
+                new("workspacePath", ScopedStorageIndexValueKind.String),
+                new("editorWorkspace", ScopedStorageIndexValueKind.String),
             ],
             MaxDocumentBytes: 131_072,
             MaxBatchSize: 100);

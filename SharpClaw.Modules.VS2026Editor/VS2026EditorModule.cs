@@ -1,5 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
-using SharpClaw.Contracts.Modules;
+using SharpClaw.Contracts.Kernel;
 using SharpClaw.ModuleSDK;
 using SharpClaw.Modules.EditorCommon;
 using SharpClaw.Modules.EditorCommon.Services;
@@ -14,16 +14,16 @@ public sealed class VS2026EditorModule : ISharpClawModule
         "VS 2026 Editor",
         "vs26");
 
-    public void Configure(ISharpClawModuleBuilder module)
+    public void ConfigureServices(IServiceCollection services)
     {
-        module.Services.AddScoped<VS2026EditorToolHandler>();
-        module.Contracts.Require<EditorModuleContract>(EditorProtocolContracts.ContractName);
+        services.AddScoped<VS2026EditorToolHandler>();
+        services.RequireContract<EditorModuleContract>(EditorProtocolContracts.ContractName);
 
         foreach (var descriptor in EditorToolCatalog.Create("vs26_", "Visual Studio 2026"))
-            module.Tools.Add<VS2026EditorToolHandler>(descriptor);
+            services.AddTool<VS2026EditorToolHandler>(descriptor);
     }
 
-    public ValueTask StartAsync(ModuleStartContext context, CancellationToken ct) =>
+    public ValueTask StartAsync(ServiceStartContext context, CancellationToken ct) =>
         ValueTask.CompletedTask;
 
     public ValueTask StopAsync(CancellationToken ct) => ValueTask.CompletedTask;

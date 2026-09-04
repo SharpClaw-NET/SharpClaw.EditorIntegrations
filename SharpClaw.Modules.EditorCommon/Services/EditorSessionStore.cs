@@ -1,12 +1,12 @@
 using System.Text.Json;
-using SharpClaw.Contracts.Modules;
+using SharpClaw.Contracts.Kernel;
 using SharpClaw.Modules.EditorCommon.Models;
 
 namespace SharpClaw.Modules.EditorCommon.Services;
 
 public sealed class EditorSessionStore
 {
-    private const string ModuleId = "sharpclaw_editor_common";
+    private const string SourceId = "sharpclaw_editor_common";
     private const string StorageName = "editor_sessions";
 
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
@@ -14,13 +14,13 @@ public sealed class EditorSessionStore
         PropertyNameCaseInsensitive = true,
     };
 
-    private readonly ModuleDocumentStore<EditorSessionDB> _store;
+    private readonly ScopedDocumentStore<EditorSessionDB> _store;
 
-    public EditorSessionStore(IModuleStorageGateway storageGateway)
+    public EditorSessionStore(IScopedStorageGateway storageGateway)
     {
-        _store = new ModuleDocumentStore<EditorSessionDB>(
+        _store = new ScopedDocumentStore<EditorSessionDB>(
             storageGateway,
-            ModuleId,
+            SourceId,
             StorageName,
             "editor_session_store",
             JsonOptions);

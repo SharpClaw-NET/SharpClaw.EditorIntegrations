@@ -1,5 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
-using SharpClaw.Contracts.Modules;
+using SharpClaw.Contracts.Kernel;
 using SharpClaw.ModuleSDK;
 using SharpClaw.Modules.EditorCommon;
 using SharpClaw.Modules.EditorCommon.Services;
@@ -14,16 +14,16 @@ public sealed class VSCodeEditorModule : ISharpClawModule
         "VS Code Editor",
         "vsc");
 
-    public void Configure(ISharpClawModuleBuilder module)
+    public void ConfigureServices(IServiceCollection services)
     {
-        module.Services.AddScoped<VSCodeEditorToolHandler>();
-        module.Contracts.Require<EditorModuleContract>(EditorProtocolContracts.ContractName);
+        services.AddScoped<VSCodeEditorToolHandler>();
+        services.RequireContract<EditorModuleContract>(EditorProtocolContracts.ContractName);
 
         foreach (var descriptor in EditorToolCatalog.Create("vsc_", "VS Code"))
-            module.Tools.Add<VSCodeEditorToolHandler>(descriptor);
+            services.AddTool<VSCodeEditorToolHandler>(descriptor);
     }
 
-    public ValueTask StartAsync(ModuleStartContext context, CancellationToken ct) =>
+    public ValueTask StartAsync(ServiceStartContext context, CancellationToken ct) =>
         ValueTask.CompletedTask;
 
     public ValueTask StopAsync(CancellationToken ct) => ValueTask.CompletedTask;

@@ -23,7 +23,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Content Include="module.json" Link="modules\sharpclaw_editor_common\module.json" CopyToOutputDirectory="PreserveNewest" Pack="true" PackagePath="sharpclaw\" />
+    <Content Include="package.json" Link="contributions\sharpclaw_editor_common\package.json" CopyToOutputDirectory="PreserveNewest" Pack="true" PackagePath="sharpclaw\" />
   </ItemGroup>
 
   <ItemGroup>

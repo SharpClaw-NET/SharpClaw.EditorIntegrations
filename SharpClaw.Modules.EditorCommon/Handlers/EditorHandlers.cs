@@ -1,20 +1,20 @@
 using System.Text.Json;
-using SharpClaw.Contracts.Modules;
+using SharpClaw.Contracts.Kernel;
 using SharpClaw.Modules.EditorCommon.Services;
 
 namespace SharpClaw.Modules.EditorCommon.Handlers;
 
 /// <summary>Lists active editor bridge connections through a typed action.</summary>
 public sealed class EditorEndpointContribution(EditorBridgeActionGateway bridge)
-    : IModuleHttpEndpointHandler
+    : IHttpEndpointHandler
 {
-    public static ModuleEndpointRouteDescriptor SessionsRoute { get; } = new(
+    public static EndpointRouteDescriptor SessionsRoute { get; } = new(
         "editor.connections.list",
         "/editor/sessions",
         "GET",
         HostEndpointTransport.Http);
 
-    public async ValueTask<ModuleHttpEndpointResponse> InvokeAsync(
+    public async ValueTask<HttpEndpointResponse> InvokeAsync(
         HostEndpointRouteRequest request,
         IHostActionEntry hostActionEntry,
         CancellationToken cancellationToken)
@@ -32,7 +32,7 @@ public sealed class EditorEndpointContribution(EditorBridgeActionGateway bridge)
                 request.Invocation.HostActionContext,
                 sessionId: null,
                 cancellationToken);
-            return ModuleHttpEndpointResponse.Json(
+            return HttpEndpointResponse.Json(
                 200,
                 JsonSerializer.SerializeToElement(result.Connections, EditorJson.Options));
         }
@@ -50,8 +50,8 @@ public sealed class EditorEndpointContribution(EditorBridgeActionGateway bridge)
         }
     }
 
-    private static ModuleHttpEndpointResponse Error(int statusCode, string code) =>
-        ModuleHttpEndpointResponse.Json(
+    private static HttpEndpointResponse Error(int statusCode, string code) =>
+        HttpEndpointResponse.Json(
             statusCode,
             JsonSerializer.SerializeToElement(new { error = code }));
 }
@@ -59,9 +59,9 @@ public sealed class EditorEndpointContribution(EditorBridgeActionGateway bridge)
 /// <summary>Runs the neutral editor WebSocket route.</summary>
 public sealed class EditorWebSocketEndpointContribution(
     EditorSessionActionGateway sessions,
-    EditorBridgeService bridge) : IModuleWebSocketEndpointHandler
+    EditorBridgeService bridge) : IWebSocketEndpointHandler
 {
-    public static ModuleEndpointRouteDescriptor WebSocketRoute { get; } = new(
+    public static EndpointRouteDescriptor WebSocketRoute { get; } = new(
         "editor.websocket",
         "/editor/ws",
         "GET",
@@ -69,7 +69,7 @@ public sealed class EditorWebSocketEndpointContribution(
 
     public ValueTask InvokeAsync(
         HostEndpointRouteRequest request,
-        IModuleWebSocketChannel channel,
+        IWebSocketChannel channel,
         IHostActionEntry hostActionEntry,
         CancellationToken cancellationToken)
     {

@@ -3,7 +3,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using SharpClaw.Contracts.DTOs.Editor;
-using SharpClaw.Contracts.Modules;
+using SharpClaw.Contracts.Kernel;
 using SharpClaw.Modules.EditorCommon.Models;
 
 namespace SharpClaw.Modules.EditorCommon.Services;
@@ -85,7 +85,7 @@ public sealed class EditorBridgeService
     }
 
     public async Task HandleConnectionAsync(
-        IModuleWebSocketChannel channel,
+        IWebSocketChannel channel,
         IHostActionEntry hostActionEntry,
         HostActionEntryRequestContext hostContext,
         EditorSessionActionGateway sessionActions,
@@ -205,29 +205,29 @@ public sealed class EditorBridgeService
     }
 
     private static async Task SendTextAsync(
-        IModuleWebSocketChannel channel,
+        IWebSocketChannel channel,
         string text,
         CancellationToken cancellationToken) =>
         await channel.SendAsync(
-            new ModuleWebSocketMessage(
-                ModuleWebSocketMessageType.Text,
+            new WebSocketMessage(
+                WebSocketMessageType.Text,
                 Encoding.UTF8.GetBytes(text)),
             cancellationToken);
 
     private static async Task<string?> ReceiveTextAsync(
-        IModuleWebSocketChannel channel,
+        IWebSocketChannel channel,
         CancellationToken cancellationToken)
     {
         var message = await channel.ReceiveAsync(cancellationToken);
-        if (message is null || message.Type == ModuleWebSocketMessageType.Close)
+        if (message is null || message.Type == WebSocketMessageType.Close)
             return null;
-        if (message.Type != ModuleWebSocketMessageType.Text)
+        if (message.Type != WebSocketMessageType.Text)
             throw new InvalidDataException("The editor bridge accepts text messages only.");
         return Encoding.UTF8.GetString(message.Payload);
     }
 
     private static async Task CloseBestEffortAsync(
-        IModuleWebSocketChannel channel,
+        IWebSocketChannel channel,
         int closeStatus,
         string closeDescription)
     {
@@ -273,6 +273,6 @@ public sealed record EditorConnection(
     EditorType EditorType,
     string? EditorVersion,
     string? WorkspacePath,
-    IModuleWebSocketChannel Channel,
+    IWebSocketChannel Channel,
     string State,
     DateTimeOffset ConnectedAt);

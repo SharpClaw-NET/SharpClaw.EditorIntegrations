@@ -1,9 +1,9 @@
 <Project>
   <Target Name="AddSharpClawModulePayloadToPackage"
-          Condition="'$(IsSharpClawModulePackage)' == 'true' and Exists('$(MSBuildProjectDirectory)\module.json')">
+          Condition="'$(IsSharpClawModulePackage)' == 'true' and Exists('$(MSBuildProjectDirectory)\package.json')">
     <ItemGroup>
       <_SharpClawModulePayload Include="$(TargetDir)**\*"
-                               Exclude="$(TargetDir)modules\**\*;$(TargetDir)**\*.pdb;$(TargetDir)**\*.xml;$(TargetDir)**\*.nupkg;@(SharpClawModulePayloadExclude)" />
+                               Exclude="$(TargetDir)contributions\**\*;$(TargetDir)**\*.pdb;$(TargetDir)**\*.xml;$(TargetDir)**\*.nupkg;@(SharpClawModulePayloadExclude)" />
       <TfmSpecificPackageFile Include="@(_SharpClawModulePayload)"
                               PackagePath="sharpclaw\" />
     </ItemGroup>

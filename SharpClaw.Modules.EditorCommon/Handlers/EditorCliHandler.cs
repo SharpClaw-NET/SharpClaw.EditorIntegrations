@@ -1,6 +1,6 @@
 using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
-using SharpClaw.Contracts.Modules;
+using SharpClaw.Contracts.Kernel;
 using SharpClaw.Modules.EditorCommon.Services;
 
 namespace SharpClaw.Modules.EditorCommon.Handlers;
@@ -8,12 +8,12 @@ namespace SharpClaw.Modules.EditorCommon.Handlers;
 /// <summary>Runs the editor session CLI through the typed session actions.</summary>
 public sealed class EditorCliHandler(
     IServiceScopeFactory scopeFactory,
-    IHostActionEntry hostActionEntry) : IModuleCliHandler
+    IHostActionEntry hostActionEntry) : ICliHandler
 {
     public static IReadOnlyList<string> Commands { get; } = ["editorsession"];
 
-    public async ValueTask<ModuleCliResult> ExecuteAsync(
-        ModuleCliInvocation invocation,
+    public async ValueTask<CliResult> ExecuteAsync(
+        CliInvocation invocation,
         CancellationToken ct)
     {
         try
@@ -80,10 +80,10 @@ public sealed class EditorCliHandler(
             : throw new ArgumentException(
                 $"Use editorsession {operation} <id>.");
 
-    private static ModuleCliResult Success(string text) =>
-        new(true, [new ModuleCliOutput("stdout", text)]);
+    private static CliResult Success(string text) =>
+        new(true, [new CliOutput("stdout", text)]);
 
-    private static ModuleCliResult Failure(string text) =>
-        new(false, [new ModuleCliOutput("stderr", text)],
+    private static CliResult Failure(string text) =>
+        new(false, [new CliOutput("stderr", text)],
             new ExecutionError("invalid_arguments", text));
 }
