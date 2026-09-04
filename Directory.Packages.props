@@ -7,8 +7,8 @@
     <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.5.1" />
     <PackageVersion Include="NUnit" Version="4.6.1" />
     <PackageVersion Include="NUnit3TestAdapter" Version="6.2.0" />
-    <PackageVersion Include="SharpClaw.Contracts" Version="[0.5.0-dev.20260904.5]" />
-    <PackageVersion Include="SharpClaw.ModuleSDK" Version="[0.5.0-dev.20260904.5]" />
+    <PackageVersion Include="SharpClaw.Contracts" Version="[0.5.0-dev.20260904.7]" />
+    <PackageVersion Include="SharpClaw.ModuleSDK" Version="[0.5.0-dev.20260904.7]" />
     <PackageVersion Include="Microsoft.VisualStudio.Extensibility.Sdk" Version="17.14.40608" />
     <PackageVersion Include="Microsoft.VisualStudio.Extensibility.Build" Version="17.14.40608" />
   </ItemGroup>
