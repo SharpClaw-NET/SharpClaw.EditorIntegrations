@@ -5,7 +5,7 @@
       <_SharpClawModulePayload Include="$(TargetDir)**\*"
                                Exclude="$(TargetDir)contributions\**\*;$(TargetDir)**\*.pdb;$(TargetDir)**\*.xml;$(TargetDir)**\*.nupkg;@(SharpClawModulePayloadExclude)" />
       <TfmSpecificPackageFile Include="@(_SharpClawModulePayload)"
-                              PackagePath="sharpclaw\" />
+                              PackagePath="sharpclaw/" />
     </ItemGroup>
   </Target>
 </Project>
