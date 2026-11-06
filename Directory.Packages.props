@@ -11,5 +11,7 @@
     <PackageVersion Include="SharpClaw.ModuleSDK" Version="[0.5.0-dev.20260920.1]" />
     <PackageVersion Include="Microsoft.VisualStudio.Extensibility.Sdk" Version="17.14.40608" />
     <PackageVersion Include="Microsoft.VisualStudio.Extensibility.Build" Version="17.14.40608" />
+    <PackageVersion Include="System.Security.Cryptography.Pkcs" Version="10.0.14" />
+    <PackageVersion Include="System.Security.Cryptography.Xml" Version="10.0.14" />
   </ItemGroup>
 </Project>
